@@ -43,4 +43,3 @@ The frame signal is a call to `fs.accessSync('/libtas/page_frame')`, which libTA
 ## Not tested yet
 
 - OMORI's video cutscenes, which play in real time inside the browser.
-- libTAS savestates.

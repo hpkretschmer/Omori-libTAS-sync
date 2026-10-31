@@ -145,6 +145,7 @@ Settings → Runtime:
 - **Prevent writing to disk:** off. With it on, libTAS currently confuses some of the game's files with its in-memory save files, which gives truncated reads and crashes.
 - **Time tracking:** `clock_gettime() monotonic` on. This is the tested configuration.
 - Wait timeout, sleep handling and asynchronous events: defaults.
+- **Savestates:** turn on **Incremental savestates** and **Skip unmapped pages**, and keep **Compressed savestates** on. Chromium reserves a lot of memory it never uses, and without these options saving or loading a state takes several seconds; with them, it takes well under a second. Leave **Fork to save states** off: it crashes the game.
 
 Movie → Movie Settings:
 
@@ -168,4 +169,4 @@ Movie → Movie Settings:
 - **Stop** may leave the game running without libTAS controlling it; use **Kill** in that case.
 - The game occasionally aborts right at the start (`FATAL:port_locker.cc` in the log, a check inside Chromium). This is rare and its cause is unknown; restart the game.
 - **F2** (the game's FPS display) doesn't reach the game under libTAS.
-- Not tested yet: libTAS savestates, and the game's video cutscenes, which play in real time inside the browser.
+- Not tested yet: the game's video cutscenes, which play in real time inside the browser.
