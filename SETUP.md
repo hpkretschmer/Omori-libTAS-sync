@@ -155,6 +155,7 @@ Movie → Movie Settings:
 
 - libTAS's frame counter counts game logic steps: each frame is exactly one step of the game. It stands still while the game starts up and while it loads, and you can only pause or frame-advance once a loading screen is finished.
 - The on-screen display works.
+- Encoding works with the libTAS build from step 9 (older builds crash on the first frame, or write a broken file when libTAS runs in a terminal). The window starts at 680×480 and the game then resizes it to 640×480, so libTAS writes the first frame into its own file: encoding to `omori.mkv` gives a one-frame `omori.mkv` and the actual video in `omori_1.mkv`.
 - If the game doesn't start after a crash or kill, delete NW.js's stale lock files:
 
   ```sh
@@ -165,5 +166,6 @@ Movie → Movie Settings:
 
 - **Prevent writing to disk** has to stay off (see above).
 - **Stop** may leave the game running without libTAS controlling it; use **Kill** in that case.
+- The game occasionally aborts right at the start (`FATAL:port_locker.cc` in the log, a check inside Chromium). This is rare and its cause is unknown; restart the game.
 - **F2** (the game's FPS display) doesn't reach the game under libTAS.
 - Not tested yet: libTAS savestates, and the game's video cutscenes, which play in real time inside the browser.
