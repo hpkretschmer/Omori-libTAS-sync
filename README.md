@@ -1,6 +1,6 @@
 # libTAS Sync for OMORI
 
-A [OneLoader](https://mods.one/mod/oneloader) mod that makes OMORI deterministic when TASing it with [libTAS](https://github.com/clementgallet/libTAS), so that movies don't desync.
+A OneLoader mod that makes OMORI deterministic when TASing it with [libTAS](https://github.com/clementgallet/libTAS), so that movies don't desync.
 
 Without it, the same inputs give different results from run to run, especially around loading. The mod makes three changes, which apply only when the game runs under libTAS. Outside of libTAS the game is unchanged.
 
@@ -10,9 +10,10 @@ Without it, the same inputs give different results from run to run, especially a
 
 ## Requirements
 
+See [SETUP.md](SETUP.md) for the complete setup. In short:
+
 - OMORI 1.0.0 running on Linux with the Linux build of NW.js 0.29.0, with the Steam integration stubbed. OMORI only ships for Windows, so this needs some setup.
-- OneLoader.
-- The Run in Background mod, so the game keeps running when its window isn't focused.
+- OneLoader, patched for Linux, and the Run in Background mod.
 - libTAS with support for page frames. This is currently on the [`nwjs-support` branch](https://github.com/hpkretschmer/libTAS/tree/nwjs-support) of a libTAS fork, not in upstream libTAS.
 
 ## Installation

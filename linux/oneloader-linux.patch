@@ -1,0 +1,115 @@
+--- a/www/modloader/overlayfs_utils.js
++++ b/www/modloader/overlayfs_utils.js
+@@ -39,6 +39,34 @@
+     }
+     window._ensure_overlay_path = _ensure_overlay_path;
+ 
++    // Paths are lowercased everywhere, which only works on case-insensitive file systems.
++    // Map a path relative to base back to the real on-disk names, component by component.
++    const _native_dir_listings = new Map();
++    function _overlay_fs_native_path(base, relativePath) {
++        const path = require('path');
++        let resolved = base;
++        for (let component of _overlay_fs_split_path(relativePath)) {
++            let candidate = path.join(resolved, component);
++            if (!fs.existsSync(candidate)) {
++                let listing = _native_dir_listings.get(resolved);
++                if (!listing) {
++                    listing = new Map();
++                    try {
++                        for (let entry of fs.readdirSync(resolved)) {
++                            listing.set(entry.toLowerCase(), entry);
++                        }
++                    } catch(e) {}
++                    _native_dir_listings.set(resolved, listing);
++                }
++                let real = listing.get(component.toLowerCase());
++                if (real) candidate = path.join(resolved, real);
++            }
++            resolved = candidate;
++        }
++        return resolved;
++    }
++    window._overlay_fs_native_path = _overlay_fs_native_path;
++
+     async function _read_file(dataSource) {
+         $modLoader.$vfsTrace("[READFILE] " + dataSource.type);
+         if (dataSource.type === "filesystem") {
+--- a/www/modloader/stage2.js
++++ b/www/modloader/stage2.js
+@@ -264,7 +264,7 @@
+ 
+             let base_file = _modloader_encryption.decrypt(
+                 await async_fs.readFile(
+-                    path.join(base, k)
++                    _overlay_fs_native_path(base, k)
+                 )
+             ).toString("utf-8");
+             let files = deltaFiles.get(k);
+--- a/www/modloader/vfs_common.js
++++ b/www/modloader/vfs_common.js
+@@ -59,7 +59,7 @@
+                     window._logLine(e.stack);
+                 }
+             }
+-            return await async_fs.readFile(path.join(base, relativePath));
++            return await async_fs.readFile(_overlay_fs_native_path(base, relativePath));
+         } else {
+             $modLoader.$vfsTrace("[ResolveSyncVFS] " + relativePath);
+             let data = await _read_file(entry.dataSource);
+@@ -107,7 +107,7 @@
+ 
+         if (bail) {
+             $modLoader.$vfsTrace("[ResolveSyncBail] " + relativePath);
+-            return native_fs.readFileSync(path.join(base, relativePath));
++            return native_fs.readFileSync(_overlay_fs_native_path(base, relativePath));
+         } else {
+             $modLoader.$vfsTrace("[ResolveSyncVFS] " + relativePath);
+             let data = _read_file_sync(entry.dataSource);
+--- a/www/modloader/vfs_node.js
++++ b/www/modloader/vfs_node.js
+@@ -2,6 +2,7 @@
+     const old_require = window.require;
+     const path = old_require("path");
+     const base = path.dirname(process.mainModule.filename).toLowerCase().replace(/[\\\/]/g, "/");
++    const nativeBase = path.dirname(process.mainModule.filename);
+ 
+     class BogusStats {
+         constructor(directory, size) {
+@@ -62,7 +63,7 @@
+             }
+         } catch(e) {}
+ 
+-        let _native_fs_location = path.join(base, ...components);
++        let _native_fs_location = _overlay_fs_native_path(nativeBase, components.join("/"));
+         let _native_fs_files = nativefs.readdirSync(_native_fs_location);
+         for (let file of _native_fs_files) {
+             if (_lowercase_name_lock.has(file.toLowerCase())) continue;
+@@ -95,7 +96,7 @@
+ 
+             throw new Error("What even the fuck happened");
+         } catch(e) {
+-            let _native_fs_location = path.join(path.join(base, ...components), file);
++            let _native_fs_location = _overlay_fs_native_path(nativeBase, components.concat(file).join("/"));
+             return nativefs.statSync(_native_fs_location);
+         }
+     }
+@@ -118,7 +119,7 @@
+ 
+             throw new Error("What even the fuck happened");
+         } catch(e) {
+-            let _native_fs_location = path.join(path.join(base, ...components), file);
++            let _native_fs_location = _overlay_fs_native_path(nativeBase, components.concat(file).join("/"));
+             return await nfsstat(_native_fs_location);
+         }
+     }
+@@ -149,7 +150,8 @@
+ 
+                     callback(null, fileData);
+                 } catch(e) {
+-                    callback(e, fileData);
++                    console.error("[VFS] readFile failed for " + path + ": " + e);
++                    callback(e);
+                 }
+             }
+         },
