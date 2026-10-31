@@ -18,7 +18,7 @@ See [SETUP.md](SETUP.md) for the complete setup. In short:
 
 ## Installation
 
-1. Download `libtassync.zip` (or build it, see below) and put it in OMORI's `www/mods/` folder.
+1. Download [`libtassync.zip`](https://github.com/hpkretschmer/Omori-libTAS-sync/releases/latest/download/libtassync.zip) from the [latest release](https://github.com/hpkretschmer/Omori-libTAS-sync/releases/latest) (or build it, see below) and put it in OMORI's `www/mods/` folder.
 2. Start the game once and check that the mod is enabled. It shows up as "libTAS Sync" in OneLoader's mod list.
 
 ## libTAS settings
