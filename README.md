@@ -2,11 +2,12 @@
 
 A OneLoader mod that makes OMORI deterministic when TASing it with [libTAS](https://github.com/clementgallet/libTAS), so that movies don't desync.
 
-Without it, the same inputs give different results from run to run, especially around loading. The mod makes three changes, which apply only when the game runs under libTAS. Outside of libTAS the game is unchanged.
+Without it, the same inputs give different results from run to run, especially around loading. The mod makes four changes, which apply only when the game runs under libTAS. Outside of libTAS the game is unchanged.
 
 - **One logic step per frame.** OMORI normally decides from the elapsed time how many logic steps to run each frame (0, 1 or 2). Under libTAS this time varies slightly from run to run. With the mod, every frame runs exactly one step.
 - **Frames are signaled to libTAS.** The browser sometimes presents an image without a new frame from the game, depending on timing. The mod tells libTAS when the game produced a frame, so libTAS only ends a frame then. It also changes an invisible pixel every frame, so that each frame is presented.
 - **Loading takes no frames.** Loading a scene takes a different number of updates every time. Those updates are not counted as frames, and they don't read inputs or advance the game's frame count. While a running scene waits for images to load, the game logic pauses.
+- **Inputs apply on the frame they are entered.** The browser delivers keyboard and mouse events at an undefined time, so an input could reach the game one frame late, or a one-frame press could get lost, depending on timing (e.g. when frame advancing). The mod ignores these events, and gets the inputs of each frame from libTAS instead. Each input affects the game update right after the frame it was entered on.
 
 ## Requirements
 
@@ -38,7 +39,7 @@ This writes `libtassync.zip`, with the files of the last commit in a `libtassync
 
 ## Technical details
 
-The frame signal is a call to `fs.accessSync('/libtas/page_frame')`, which libTAS intercepts in its `access()` hook. It is documented in `src/library/PageFrame.h` of the libTAS fork. The plugin only uses RPG Maker MV's `SceneManager`, `ImageManager` and `Graphics`, so it might also work in other RPG Maker MV games that run on NW.js, but it has only been tested with OMORI.
+The frame signal is a call to `fs.readlinkSync('/libtas/page_frame')`, which libTAS intercepts in its `readlink()` hook and answers with the inputs of the frame. With older libTAS builds that only support `fs.accessSync('/libtas/page_frame')`, the mod falls back to that, and inputs arrive as browser events as before. It is documented in `src/library/PageFrame.h` of the libTAS fork. The plugin only uses RPG Maker MV's `SceneManager`, `ImageManager` and `Graphics`, so it might also work in other RPG Maker MV games that run on NW.js, but it has only been tested with OMORI.
 
 ## Not tested yet
 
