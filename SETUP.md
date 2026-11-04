@@ -2,6 +2,8 @@
 
 This guide gets OMORI 1.0.0 running deterministically under [libTAS](https://github.com/clementgallet/libTAS) on Linux. OMORI only ships for Windows, but it's an RPG Maker MV game that runs on NW.js (Chromium with Node.js), so its game files run on the Linux build of the same NW.js version, without Wine or Proton.
 
+The game stays as close to unmodified as possible: besides the Steam stub that Linux needs, the only change is one script line in `index.html` (see [README.md](README.md)). Mods are optional.
+
 Tested on Linux Mint with X11. The paths below are examples; adjust them to your system.
 
 | What | Example path |
@@ -10,7 +12,7 @@ Tested on Linux Mint with X11. The paths below are examples; adjust them to your
 | Linux NW.js | `~/Games/nwjs/nwjs-v0.29.0-linux-x64` |
 | Game data and NW.js profile | `~/Games/omori-tas-data` |
 
-The files referred to below (`linux/...`) are in this repository.
+The files referred to below (`libtas_web.js`, `linux/...`) are in this repository.
 
 ## 1. Get the Windows game files
 
@@ -45,7 +47,21 @@ done
 
 NW.js doesn't need to be copied into the game folder; it is started with the game folder as argument.
 
-## 4. Replace the Steam integration with a stub
+## 4. Build and install libTAS with NW.js support
+
+The support for NW.js games is on the `nwjs-support` branch of a libTAS fork, not in upstream libTAS yet. Install the dependencies listed in libTAS's README, then:
+
+```sh
+git clone -b nwjs-support https://github.com/hpkretschmer/libTAS.git
+cd libTAS
+./build.sh
+cd build
+sudo make install
+```
+
+This installs libTAS, and `libtas-casefold.so` (see step 7) next to it in `/usr/local/bin`. Restart libTAS after installing a new build.
+
+## 5. Replace the Steam integration with a stub
 
 The game's Steam binding needs a running Steam client. Replace it with a stub that reports Steam as unavailable, which makes the game turn off achievements, cloud saves and the overlay:
 
@@ -55,17 +71,28 @@ mv greenworks.js greenworks.js.orig
 cp /path/to/Omori-libTAS-sync/linux/greenworks.js .
 ```
 
-## 5. Fix the case of the Languages folder
+## 6. Add the libTAS script
 
-The game reads `www/Languages/`, but the folder is `www/languages/`. Windows doesn't care, Linux does:
+Copy `libtas_web.js` into the game's `www` folder:
 
 ```sh
-ln -s languages ~/Games/omori-tas/www/Languages
+cp /path/to/Omori-libTAS-sync/libtas_web.js ~/Games/omori-tas/www/
 ```
 
-## 6. Test the game without libTAS
+Then open `~/Games/omori-tas/www/index.html` in a text editor and add this line as the first `<script>` line, before `js/libs/pixi.js`:
 
-`linux/run-linux.sh` starts the game with the NW.js options needed for libTAS (single process, no GPU). It also sets `LOCALAPPDATA`, where the game stores which cutscenes can be skipped (`OMORI/CUTSCENE.json`); that variable doesn't exist on Linux.
+```html
+<script type="text/javascript" src="libtas_web.js"></script>
+```
+
+Outside of libTAS, the script does nothing.
+
+## 7. Test the game without libTAS
+
+`linux/run-linux.sh` starts the game with the NW.js options needed for libTAS (single process, no GPU). It also:
+
+- sets `LOCALAPPDATA`, where the game stores which cutscenes can be skipped (`OMORI/CUTSCENE.json`); that variable doesn't exist on Linux.
+- loads `libtas-casefold.so` from step 4. The game accesses some files with a different case than they have (e.g. `www/Languages/` for `www/languages/`, `Leaf.png` for `leaf.rpgmvp`), which only works on Windows. The library finds these files ignoring case. Under libTAS, libTAS does the same itself (step 8).
 
 ```sh
 cp /path/to/Omori-libTAS-sync/linux/run-linux.sh ~/Games/omori-tas/
@@ -82,45 +109,9 @@ The title screen should appear. These log lines are expected:
 | `fail_if_major_perf_caveat + swiftshader` | WebGL is refused, the game uses its Canvas renderer |
 | `ENOENT ... OMORI/CUTSCENE.json` | No cutscene has been seen yet |
 
-If you see `ENOENT ... www/Languages/` or `$atlasData is not defined`, step 5 is missing.
+If you see `ENOENT ... www/Languages/` or `$atlasData is not defined`, `libtas-casefold.so` was not loaded: check that it's in `/usr/local/bin`, or set `CASEFOLD=/path/to/libtas-casefold.so`.
 
-## 7. Install OneLoader and patch it for Linux
-
-Install OneLoader (from mods.one) into the game folder as described in its instructions. OneLoader lowercases every file path, which only works on case-insensitive file systems: on Linux the game hangs on a black screen with `ENOENT: ... archeia_corechanges.omori` in the log. Apply the patch from this repository, which maps lowercased paths back to the real file names:
-
-```sh
-cd ~/Games/omori-tas
-for f in overlayfs_utils stage2 vfs_common vfs_node; do cp www/modloader/$f.js www/modloader/$f.js.orig; done
-patch -p1 < /path/to/Omori-libTAS-sync/linux/oneloader-linux.patch
-```
-
-The patch also fixes an error handler in OneLoader that referenced an undefined variable. Reinstalling or updating OneLoader removes the patch, so keep its automatic updates off (`"check": "deny"` in `www/save/mods.json`).
-
-## 8. Install the mods
-
-Put these zips in `www/mods/`:
-
-- **libTAS Sync** (this repository): required, makes the game deterministic under libTAS. See [README.md](README.md).
-- **Run in Background** (from mods.one): required. libTAS doesn't give the game window the focus Chromium expects, and without this mod the game pauses itself.
-- **Enable Mouse** (from mods.one): optional.
-
-Start the game once with `run-linux.sh` and check that the mods are enabled in OneLoader's mod list.
-
-## 9. Build and install libTAS with NW.js support
-
-The support for NW.js games is on the `nwjs-support` branch of a libTAS fork, not in upstream libTAS yet. Install the dependencies listed in libTAS's README, then:
-
-```sh
-git clone -b nwjs-support https://github.com/hpkretschmer/libTAS.git
-cd libTAS
-./build.sh
-cd build
-sudo make install
-```
-
-Restart libTAS after installing a new build.
-
-## 10. Configure libTAS
+## 8. Configure libTAS
 
 Main window:
 
@@ -138,7 +129,8 @@ File → Executable Options:
 - **Working directory:** `/home/you/Games/omori-tas`
 - **Environment variables:**
   - `LOCALAPPDATA` = `/home/you/Games/omori-tas-data`
-  - `LIBTAS_PAGE_FRAMES` = `1`
+  - `LIBTAS_PAGE_FRAMES` = `1`: libTAS only ends a frame when the script signals one.
+  - `LIBTAS_CASE_INSENSITIVE` = `1`: libTAS finds files ignoring case (see step 7).
 
 Settings → Runtime:
 
@@ -149,14 +141,24 @@ Settings → Runtime:
 
 Movie → Movie Settings:
 
-- **Mouse support:** on, if you use the Enable Mouse mod.
+- **Mouse support:** on, if you want to use the mouse (e.g. with the Enable Mouse mod).
 - **Framerate:** 60.
+
+## 9. Optional: OneLoader and mods
+
+Mods are useful while working on a TAS, but they change the game: a TAS that is meant to sync on the unmodified game should be made without mods that change the gameplay.
+
+1. Install OneLoader (from mods.one) into the game folder as described in its instructions. It works unmodified: `LIBTAS_CASE_INSENSITIVE` and `libtas-casefold.so` find the files that OneLoader accesses in lowercase.
+2. OneLoader replaces `www/index.html` with its own. Add the script line from step 6 again, as the first `<script>` line of OneLoader's `index.html`.
+3. Keep OneLoader's automatic updates off (`"check": "deny"` in `www/save/mods.json`); an update replaces `index.html` and removes the script line.
+4. Put mods in `www/mods/`, e.g. **Enable Mouse** to use the mouse. The Run in Background mod is not needed: libTAS keeps the game focused.
 
 ## Using it
 
-- libTAS's frame counter counts game logic steps: each frame is exactly one step of the game. It stands still while the game starts up and while it loads, and you can only pause or frame-advance once a loading screen is finished.
+- libTAS's frame counter counts the game's animation frames, and the game runs one logic step per frame. While files are loading, frames stand still: loading takes no frames, as if it was instant.
+- Inputs entered on a frame reach the game at the start of the next frame, also when frame advancing.
 - The on-screen display works.
-- Encoding works with the libTAS build from step 9 (older builds crash on the first frame, or write a broken file when libTAS runs in a terminal). The window starts at 680×480 and the game then resizes it to 640×480, so libTAS writes the first frame into its own file: encoding to `omori.mkv` gives a one-frame `omori.mkv` and the actual video in `omori_1.mkv`.
+- Encoding works. The window starts at 680×480 and the game then resizes it to 640×480, so libTAS writes the first frame into its own file: encoding to `omori.mkv` gives a one-frame `omori.mkv` and the actual video in `omori_1.mkv`.
 - If the game doesn't start after a crash or kill, delete NW.js's stale lock files:
 
   ```sh
@@ -167,6 +169,5 @@ Movie → Movie Settings:
 
 - **Prevent writing to disk** has to stay off (see above).
 - **Stop** may leave the game running without libTAS controlling it; use **Kill** in that case.
-- The game occasionally aborts right at the start (`FATAL:port_locker.cc` in the log, a check inside Chromium). This is rare and its cause is unknown; restart the game.
-- **F2** (the game's FPS display) doesn't reach the game under libTAS.
-- Not tested yet: the game's video cutscenes, which play in real time inside the browser.
+- Movies made with the earlier libTAS Sync mod (release v1.0.0) don't sync with `libtas_web.js`: frames and input timing are defined differently.
+- Not tested yet: the game's video cutscenes, which play in real time inside the browser, F2 (the game's FPS display), mouse clicks, and the mouse wheel.

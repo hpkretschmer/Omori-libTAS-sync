@@ -1,46 +1,43 @@
-# libTAS Sync for OMORI
+# libTAS for OMORI
 
-A OneLoader mod that makes OMORI deterministic when TASing it with [libTAS](https://github.com/clementgallet/libTAS), so that movies don't desync.
+Makes OMORI deterministic when TASing it with [libTAS](https://github.com/clementgallet/libTAS) on Linux, so that movies don't desync, with as little change to the game as possible: one script, `libtas_web.js`, loaded by one line in the game's `index.html`. No mods are needed.
 
-Without it, the same inputs give different results from run to run, especially around loading. The mod makes four changes, which apply only when the game runs under libTAS. Outside of libTAS the game is unchanged.
+The script knows nothing about OMORI or RPG Maker. It should also work for other games running on NW.js, such as other RPG Maker MV and MZ games, but it has only been tested with OMORI so far.
 
-- **One logic step per frame.** OMORI normally decides from the elapsed time how many logic steps to run each frame (0, 1 or 2). Under libTAS this time varies slightly from run to run. With the mod, every frame runs exactly one step.
-- **Frames are signaled to libTAS.** The browser sometimes presents an image without a new frame from the game, depending on timing. The mod tells libTAS when the game produced a frame, so libTAS only ends a frame then. It also changes an invisible pixel every frame, so that each frame is presented.
-- **Loading takes no frames.** Loading a scene takes a different number of updates every time. Those updates are not counted as frames, and they don't read inputs or advance the game's frame count. While a running scene waits for images to load, the game logic pauses.
-- **Inputs apply on the frame they are entered.** The browser delivers keyboard and mouse events at an undefined time, so an input could reach the game one frame late, or a one-frame press could get lost, depending on timing (e.g. when frame advancing). The mod ignores these events, and gets the inputs of each frame from libTAS instead. Each input affects the game update right after the frame it was entered on.
+## What the script does
+
+Outside of libTAS, nothing. Under libTAS, it changes how the game sees its surroundings (time, inputs, loading), not the game's logic:
+
+- **Frames are signaled to libTAS.** The browser presents images on its own schedule, sometimes without a new frame from the game, so libTAS can't tell game frames apart by itself. The script tells libTAS when the game starts an animation frame (`requestAnimationFrame`), and changes an invisible pixel every frame, so that each frame is presented.
+- **Time advances exactly 1/60 s per frame.** The game decides from the elapsed time how many logic steps to run each frame. The page's clock (`performance.now()`, `Date.now()` and the time of animation frames) advances by exactly one frame duration per frame, so the game always runs one step per frame, like on a perfectly steady 60 Hz screen.
+- **Inputs apply on the frame they are entered.** The browser delivers keyboard and mouse events at an undefined time, so an input could reach the game one frame late, or a one-frame press could get lost, depending on timing (e.g. when frame advancing). The script ignores these events, and gets the inputs of each frame from libTAS instead.
+- **Loading takes no frames.** Loading files takes a different time every run. While images, data files or audio are loading, the script holds back the game's animation frames, as if loading was instant.
 
 ## Requirements
 
 See [SETUP.md](SETUP.md) for the complete setup. In short:
 
 - OMORI 1.0.0 running on Linux with the Linux build of NW.js 0.29.0, with the Steam integration stubbed. OMORI only ships for Windows, so this needs some setup.
-- OneLoader, patched for Linux, and the Run in Background mod.
-- libTAS with support for page frames. This is currently on the [`nwjs-support` branch](https://github.com/hpkretschmer/libTAS/tree/nwjs-support) of a libTAS fork, not in upstream libTAS.
+- libTAS with support for page frames and case-insensitive file names. This is currently on the [`nwjs-support` branch](https://github.com/hpkretschmer/libTAS/tree/nwjs-support) of a libTAS fork, not in upstream libTAS.
 
 ## Installation
 
-1. Download [`libtassync.zip`](https://github.com/hpkretschmer/Omori-libTAS-sync/releases/latest/download/libtassync.zip) from the [latest release](https://github.com/hpkretschmer/Omori-libTAS-sync/releases/latest) (or build it, see below) and put it in OMORI's `www/mods/` folder.
-2. Start the game once and check that the mod is enabled. It shows up as "libTAS Sync" in OneLoader's mod list.
+1. Copy [`libtas_web.js`](libtas_web.js) into the game's `www` folder.
+2. Add this line to `www/index.html`, as the first `<script>` line:
 
-## libTAS settings
+   ```html
+   <script type="text/javascript" src="libtas_web.js"></script>
+   ```
 
-- **Environment variable** (File > Executable Options): `LIBTAS_PAGE_FRAMES` = `1`. This makes libTAS wait for the game's first frame signal, so starting the game doesn't create frames either.
-- **Game arguments**: add `--run-all-compositor-stages-before-draw` to the NW.js arguments.
-
-With these settings, libTAS's frame counter counts game logic steps. It stands still while the game starts up and while it loads, and you can only pause or frame-advance between loading screens.
-
-## Building the zip
-
-```sh
-./make-zip.sh
-```
-
-This writes `libtassync.zip`, with the files of the last commit in a `libtassync/` folder.
+   With OneLoader, add it to OneLoader's `index.html` instead.
+3. In libTAS (File → Executable Options), set the environment variables `LIBTAS_PAGE_FRAMES` = `1` and `LIBTAS_CASE_INSENSITIVE` = `1`, and add `--run-all-compositor-stages-before-draw` to the NW.js arguments.
 
 ## Technical details
 
-The frame signal is a call to `fs.readlinkSync('/libtas/page_frame')`, which libTAS intercepts in its `readlink()` hook and answers with the inputs of the frame. With older libTAS builds that only support `fs.accessSync('/libtas/page_frame')`, the mod falls back to that, and inputs arrive as browser events as before. It is documented in `src/library/PageFrame.h` of the libTAS fork. The plugin only uses RPG Maker MV's `SceneManager`, `ImageManager` and `Graphics`, so it might also work in other RPG Maker MV games that run on NW.js, but it has only been tested with OMORI.
+The frame signal is a call to `fs.readlinkSync('/libtas/page_frame')`, which libTAS intercepts in its `readlink()` hook and answers with the inputs of the frame. It is documented in `src/library/PageFrame.h` of the libTAS fork. With older libTAS builds that only support `fs.accessSync('/libtas/page_frame')`, the script falls back to that, and inputs arrive as browser events.
 
-## Not tested yet
+For debugging, a page can set `window.__libtasAfterFrame` to a function, which the script calls with the frame number after each frame.
 
-- OMORI's video cutscenes, which play in real time inside the browser.
+## History
+
+Before `libtas_web.js`, this repository contained the libTAS Sync mod, a OneLoader mod for OMORI that changed the game's main loop instead (release [v1.0.0](https://github.com/hpkretschmer/Omori-libTAS-sync/releases/tag/v1.0.0), and in the git history). Movies made with it don't sync with `libtas_web.js`.
