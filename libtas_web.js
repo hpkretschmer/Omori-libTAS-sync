@@ -12,7 +12,8 @@
 //   libTAS frame, signaled to libTAS. The browser presents images on its own
 //   schedule, so libTAS cannot tell game frames from other presents by itself.
 // - Time: the page's clock (performance.now(), Date.now() and the time passed
-//   to animation frame callbacks) advances exactly 1/60 s per frame.
+//   to animation frame callbacks) advances exactly one frame duration per
+//   frame, at the framerate set in libTAS (1/60 s at 60 fps).
 // - Inputs: the inputs of each frame are read from libTAS and sent to the page
 //   as keyboard and mouse events at the start of the frame. The real input
 //   events, which arrive at an undefined time, are ignored.
@@ -138,9 +139,13 @@
 
     /* Send the changes of the inputs from libTAS as events to the page. The
      * inputs are "<pointer x> <pointer y> <button mask> <wheel> <keysym>...",
-     * see PageFrame.h in libTAS. */
+     * see PageFrame.h in libTAS. Returns the framerate field
+     * "r<num>/<den>", or undefined if libTAS does not send it. */
     function applyInputs(inputs) {
         var fields = inputs.split(' ');
+        var framerate;
+        if (fields[4] && fields[4][0] === 'r')
+            framerate = fields.splice(4, 1)[0];
         var x = parseInt(fields[0], 10);
         var y = parseInt(fields[1], 10);
         var mask = parseInt(fields[2], 10);
@@ -177,26 +182,56 @@
             }));
         }
         sentMouse = {x: x, y: y, mask: mask};
+        return framerate;
     }
 
     //-------------------------------------------------------------------------
     // Time
     //-------------------------------------------------------------------------
 
-    var frameDuration = 1000 / 60;
     var frames = 0;
+
+    /* Duration of a frame in ms at a framerate of num/den, as a multiple of
+     * 2^-24 ms, slightly longer than the exact duration (by 0.5 to 1.5 times
+     * 2^-24 ms, about 6e-8 ms). Games accumulate the elapsed time and run one
+     * logic step each time it reaches the step duration, e.g. 1/60 s. With
+     * the exact duration, rounding errors put the accumulated time sometimes
+     * just below the step duration and sometimes just above, so that some
+     * frames run no logic step and others two. Multiples of 2^-24 ms add up
+     * without rounding errors, and the small excess puts the accumulated time
+     * always just above the step duration. It adds up to one extra logic step
+     * only after more than 10^8 frames. */
+    var scale = 16777216;
+    function durationOf(num, den) {
+        return Math.ceil(1000 * den / num * scale + 0.5) / scale;
+    }
+    var frameDuration = durationOf(60, 1);
+    var framerate = 'r60/1';
+
+    function setFramerate(field) {
+        if (!field || field === framerate)
+            return;
+        var parts = field.slice(1).split('/');
+        var num = parseInt(parts[0], 10);
+        var den = parseInt(parts[1], 10);
+        if (num > 0 && den > 0) {
+            framerate = field;
+            frameDuration = durationOf(num, den);
+        }
+    }
 
     /* Fixed start values, because the time when the page loads varies. The
      * date is rounded to the minute, libTAS starts at a fixed date. */
     var clockStart = 1000;
+    var clock = clockStart;
     var dateStart = Math.floor(Date.now() / 60000) * 60000;
 
     function now() {
-        return clockStart + frames * frameDuration;
+        return clock;
     }
     performance.now = now;
     Date.now = function() {
-        return Math.floor(dateStart + frames * frameDuration);
+        return Math.floor(dateStart + (clock - clockStart));
     };
 
     //-------------------------------------------------------------------------
@@ -326,11 +361,12 @@
 
         var inputs = directInputs ? readlinkSignal() : null;
         if (inputs !== null)
-            applyInputs(inputs);
+            setFramerate(applyInputs(inputs));
         else
             accessSignal();
         toggleMarker();
         frames++;
+        clock += frameDuration;
 
         var current = callbacks;
         callbacks = [];

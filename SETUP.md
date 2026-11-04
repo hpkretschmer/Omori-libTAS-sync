@@ -142,7 +142,7 @@ Settings → Runtime:
 Movie → Movie Settings:
 
 - **Mouse support:** on, if you want to use the mouse (e.g. with the Enable Mouse mod).
-- **Framerate:** 60.
+- **Framerate:** 60. Multiples of 60 work too: at 120 fps, the game runs at normal speed with one logic step every other frame (180 fps: every third frame, …). The game only reads keyboard and gamepad inputs on the frames with a logic step, so on the frames in between, only mouse clicks have an effect (see "Using it").
 
 ## 9. Optional: OneLoader and mods
 
@@ -157,6 +157,7 @@ Mods are useful while working on a TAS, but they change the game: a TAS that is 
 
 - libTAS's frame counter counts the game's animation frames, and the game runs one logic step per frame. While files are loading, frames stand still: loading takes no frames, as if it was instant.
 - Inputs entered on a frame reach the game at the start of the next frame, also when frame advancing.
+- The game can't see a key pressed on two logic steps in a row as two presses: it compares the state of each button at each logic step, so the key has to be released for at least one logic step in between. This is how RPG Maker reads keys, also without libTAS. Mouse clicks are different: the game collects them between two logic steps, so at 120 fps, pressing on one frame and releasing on the next counts as one click per logic step. That needs a mod that enables the mouse, because OMORI ignores mouse clicks by default (not tested yet).
 - The on-screen display works.
 - Encoding works. The window starts at 680×480 and the game then resizes it to 640×480, so libTAS writes the first frame into its own file: encoding to `omori.mkv` gives a one-frame `omori.mkv` and the actual video in `omori_1.mkv`.
 - If the game doesn't start after a crash or kill, delete NW.js's stale lock files:
