@@ -22,7 +22,7 @@ See [SETUP.md](SETUP.md) for the complete setup. In short:
 
 ## Installation
 
-1. Copy [`libtas_web.js`](libtas_web.js) into the game's `www` folder.
+1. Download `libtas_web.js` from the [latest release](https://github.com/hpkretschmer/Omori-libTAS-sync/releases/latest) (or take [`libtas_web.js`](libtas_web.js) from this repository), and copy it into the game's `www` folder.
 2. Add this line to `www/index.html`, as the first `<script>` line:
 
    ```html
