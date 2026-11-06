@@ -1,6 +1,6 @@
 # libTAS for OMORI
 
-Makes OMORI deterministic when TASing it with [libTAS](https://github.com/clementgallet/libTAS) on Linux, so that movies don't desync, with as little change to the game as possible: one script, `libtas_web.js`, loaded by one line in the game's `index.html`. No mods are needed.
+Makes OMORI deterministic when TASing it with [libTAS](https://github.com/clementgallet/libTAS) on Linux, so that movies don't desync, without changing the game's files: libTAS injects one script, `libtas_web.js`, into the game when it starts it. No mods are needed.
 
 The script knows nothing about OMORI or RPG Maker. It should also work for other games running on NW.js, such as other RPG Maker MV and MZ games, but it has only been tested with OMORI so far.
 
@@ -24,19 +24,17 @@ See [SETUP.md](SETUP.md) for the complete setup. In short:
 
 ## Installation
 
-1. Download `libtas_web.js` from the [latest release](https://github.com/hpkretschmer/Omori-libTAS-sync/releases/latest) (or take [`libtas_web.js`](libtas_web.js) from this repository), and copy it into the game's `www` folder.
-2. Add this line to `www/index.html`, as the first `<script>` line:
+In libTAS (File → Executable Options), set the environment variables `LIBTAS_PAGE_FRAMES` = `1` and `LIBTAS_CASE_INSENSITIVE` = `1`, and add `--run-all-compositor-stages-before-draw` to the NW.js arguments. Nothing has to be added to the game.
 
-   ```html
-   <script type="text/javascript" src="libtas_web.js"></script>
-   ```
+The script is part of the libTAS fork ([`src/library/web/libtas_web.js`](https://github.com/hpkretschmer/libTAS/blob/nwjs-support/src/library/web/libtas_web.js)), which builds it into `libtas.so`. With `LIBTAS_PAGE_FRAMES=1`, libTAS gives NW.js the game's `package.json` with `"inject_js_start"` added, so that NW.js runs the script before any script of the game. The game's files stay unchanged.
 
-   With OneLoader, add it to OneLoader's `index.html` instead.
-3. In libTAS (File → Executable Options), set the environment variables `LIBTAS_PAGE_FRAMES` = `1` and `LIBTAS_CASE_INSENSITIVE` = `1`, and add `--run-all-compositor-stages-before-draw` to the NW.js arguments.
+If you added the script to `index.html` with an earlier version of this guide, remove that line and `www/libtas_web.js`: the old script would run a second time.
+
+Earlier versions of the script, for loading it from `index.html`, are in the [releases](https://github.com/hpkretschmer/Omori-libTAS-sync/releases) and the git history of this repository.
 
 ## Technical details
 
-The frame signal is a call to `fs.readlinkSync('/libtas/page_frame')`, which libTAS intercepts in its `readlink()` hook and answers with the inputs of the frame. It is documented in `src/library/PageFrame.h` of the libTAS fork. With older libTAS builds that only support `fs.accessSync('/libtas/page_frame')`, the script falls back to that, and inputs arrive as browser events.
+The frame signal is a call to `fs.readlinkSync('/libtas/page_frame')`, which libTAS intercepts in its `readlink()` hook and answers with the inputs of the frame. At the end of each frame, the script calls `fs.accessSync()` on `/libtas/page_frame_end` or `/libtas/page_frame_end_nodraw`. This is documented in `src/library/PageFrame.h` of the libTAS fork, and the injection in `src/library/PageScript.h`.
 
 For debugging, a page can set `window.__libtasAfterFrame` to a function, which the script calls with the frame number after each frame.
 

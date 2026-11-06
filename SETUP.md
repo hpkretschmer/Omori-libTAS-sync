@@ -2,7 +2,7 @@
 
 This guide gets OMORI 1.0.0 running deterministically under [libTAS](https://github.com/clementgallet/libTAS) on Linux. OMORI only ships for Windows, but it's an RPG Maker MV game that runs on NW.js (Chromium with Node.js), so its game files run on the Linux build of the same NW.js version, without Wine or Proton.
 
-The game stays as close to unmodified as possible: besides the Steam stub that Linux needs, the only change is one script line in `index.html` (see [README.md](README.md)). Mods are optional.
+The game stays as close to unmodified as possible: besides the Steam stub that Linux needs, nothing in the game is changed. libTAS injects its script into the game (see [README.md](README.md)). Mods are optional.
 
 Tested on Linux Mint with X11. The paths below are examples; adjust them to your system.
 
@@ -12,7 +12,7 @@ Tested on Linux Mint with X11. The paths below are examples; adjust them to your
 | Linux NW.js | `~/Games/nwjs/nwjs-v0.29.0-linux-x64` |
 | Game data and NW.js profile | `~/Games/omori-tas-data` |
 
-The files referred to below (`libtas_web.js`, `linux/...`) are in this repository.
+The files referred to below (`linux/...`) are in this repository.
 
 ## 1. Get the Windows game files
 
@@ -71,21 +71,11 @@ mv greenworks.js greenworks.js.orig
 cp /path/to/Omori-libTAS-sync/linux/greenworks.js .
 ```
 
-## 6. Add the libTAS script
+## 6. The libTAS script
 
-Copy `libtas_web.js` into the game's `www` folder:
+Nothing to do: the libTAS fork from step 8 injects its script, `libtas_web.js`, into the game when it starts it with `LIBTAS_PAGE_FRAMES=1`, and the game's files stay unchanged.
 
-```sh
-cp /path/to/Omori-libTAS-sync/libtas_web.js ~/Games/omori-tas/www/
-```
-
-Then open `~/Games/omori-tas/www/index.html` in a text editor and add this line as the first `<script>` line, before `js/libs/pixi.js`:
-
-```html
-<script type="text/javascript" src="libtas_web.js"></script>
-```
-
-Outside of libTAS, the script does nothing.
+If you followed an earlier version of this guide, which added `<script type="text/javascript" src="libtas_web.js"></script>` to `index.html`, remove that line and `www/libtas_web.js`.
 
 ## 7. Test the game without libTAS
 
@@ -141,7 +131,7 @@ Settings → Runtime:
 
 Tools → Fast-forward mode:
 
-- **Skipping all rendering** fast-forwards fastest: the game then doesn't draw on screen, and its frames don't wait for the browser's frame rate. With **Skipping most rendering**, the frames that are drawn still wait for it. This needs `libtas_web.js` 2.2.0 or later, and a build of the libTAS fork from the same time or later.
+- **Skipping all rendering** fast-forwards fastest: the game then doesn't draw on screen, and its frames don't wait for the browser's frame rate. With **Skipping most rendering**, the frames that are drawn still wait for it. This needs a current build of the libTAS fork.
 
 Movie → Movie Settings:
 
@@ -153,9 +143,7 @@ Movie → Movie Settings:
 Mods are useful while working on a TAS, but they change the game: a TAS that is meant to sync on the unmodified game should be made without mods that change the gameplay.
 
 1. Install OneLoader (from mods.one) into the game folder as described in its instructions. It works unmodified: `LIBTAS_CASE_INSENSITIVE` and `libtas-casefold.so` find the files that OneLoader accesses in lowercase.
-2. OneLoader replaces `www/index.html` with its own. Add the script line from step 6 again, as the first `<script>` line of OneLoader's `index.html`.
-3. Keep OneLoader's automatic updates off (`"check": "deny"` in `www/save/mods.json`); an update replaces `index.html` and removes the script line.
-4. Put mods in `www/mods/`, e.g. **Enable Mouse** to use the mouse. The Run in Background mod is not needed: libTAS keeps the game focused.
+2. Put mods in `www/mods/`, e.g. **Enable Mouse** to use the mouse. The Run in Background mod is not needed: libTAS keeps the game focused.
 
 ## Using it
 
