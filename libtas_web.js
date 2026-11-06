@@ -17,9 +17,10 @@
 // - Inputs: the inputs of each frame are read from libTAS and sent to the page
 //   as keyboard and mouse events at the start of the frame. The real input
 //   events, which arrive at an undefined time, are ignored.
-// - Loading: while images, XMLHttpRequests, fetches or audio decoding are in
-//   progress, the page's animation frames are held back, so that loading takes
-//   no frames, as if loading was instant.
+// - Loading: while images, XMLHttpRequests, fetches, audio decoding or Node.js
+//   file and zlib operations (NW.js) are in progress, the page's animation
+//   frames are held back, so that loading takes no frames, as if loading was
+//   instant.
 //
 // It needs a libTAS with page frame support, started with LIBTAS_PAGE_FRAMES=1.
 // Observers for debugging can set window.__libtasAfterFrame to a function,
@@ -290,6 +291,103 @@
             return trackPromise(fetchOrig.apply(this, arguments));
         };
     }
+
+    /* Node.js operations with a callback (NW.js), e.g. the file reads of mod
+     * loaders such as OneLoader. They run on other threads and finish after a
+     * time that varies, so they are loads too. The callback is counted until
+     * it returned, so that loads it starts (also in promise reactions, which
+     * run right after it) are counted before the next frame. */
+    function trackCallbacks(module, names) {
+        if (!module)
+            return;
+        names.forEach(function(name) {
+            var orig = module[name];
+            if (typeof orig !== 'function')
+                return;
+            var wrapped = function() {
+                var last = arguments.length - 1;
+                var callback = arguments[last];
+                if (typeof callback !== 'function')
+                    return orig.apply(this, arguments);
+                var args = Array.prototype.slice.call(arguments);
+                var finished = false;
+                args[last] = function() {
+                    if (finished)
+                        return callback.apply(this, arguments);
+                    finished = true;
+                    try {
+                        return callback.apply(this, arguments);
+                    } finally {
+                        pendingLoads--;
+                    }
+                };
+                pendingLoads++;
+                try {
+                    return orig.apply(this, args);
+                } catch (e) {
+                    if (!finished) {
+                        finished = true;
+                        pendingLoads--;
+                    }
+                    throw e;
+                }
+            };
+            /* Keep properties such as util.promisify.custom or realpath.native */
+            Object.getOwnPropertyNames(orig).concat(Object.getOwnPropertySymbols(orig)).forEach(function(key) {
+                if (['length', 'name', 'prototype', 'arguments', 'caller'].indexOf(key) === -1)
+                    Object.defineProperty(wrapped, key, Object.getOwnPropertyDescriptor(orig, key));
+            });
+            module[name] = wrapped;
+        });
+    }
+
+    /* Node.js streams that work on other threads, until their work is done */
+    function trackStreams(module, names) {
+        if (!module)
+            return;
+        names.forEach(function(name) {
+            var orig = module[name];
+            if (typeof orig !== 'function')
+                return;
+            module[name] = function() {
+                var stream = orig.apply(this, arguments);
+                if (!stream || !stream.once)
+                    return stream;
+                var ended = false;
+                var end = function() {
+                    if (!ended) {
+                        ended = true;
+                        pendingLoads--;
+                    }
+                };
+                pendingLoads++;
+                ['finish', 'close', 'error'].forEach(function(type) {
+                    stream.once(type, end);
+                });
+                return stream;
+            };
+        });
+    }
+
+    function nodeModule(name) {
+        try {
+            return process.mainModule.require(name);
+        } catch (e) {
+            return null;
+        }
+    }
+
+    trackCallbacks(fs, ['access', 'appendFile', 'chmod', 'chown', 'close', 'copyFile',
+        'exists', 'fchmod', 'fchown', 'fdatasync', 'fstat', 'fsync', 'ftruncate',
+        'futimes', 'lchmod', 'lchown', 'link', 'lstat', 'mkdir', 'mkdtemp', 'open',
+        'read', 'readdir', 'readFile', 'readlink', 'realpath', 'rename', 'rmdir',
+        'stat', 'symlink', 'truncate', 'unlink', 'utimes', 'write', 'writeFile']);
+    var zlib = nodeModule('zlib');
+    trackCallbacks(zlib, ['deflate', 'deflateRaw', 'gzip', 'gunzip', 'inflate',
+        'inflateRaw', 'unzip', 'brotliCompress', 'brotliDecompress']);
+    trackStreams(zlib, ['createDeflate', 'createDeflateRaw', 'createGzip',
+        'createGunzip', 'createInflate', 'createInflateRaw', 'createUnzip',
+        'createBrotliCompress', 'createBrotliDecompress']);
 
     var AudioContextClass = window.AudioContext || window.webkitAudioContext;
     if (AudioContextClass) {
