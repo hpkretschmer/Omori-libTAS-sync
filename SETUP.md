@@ -139,6 +139,10 @@ Settings → Runtime:
 - Wait timeout, sleep handling and asynchronous events: defaults.
 - **Savestates:** turn on **Incremental savestates** and **Skip unmapped pages**, and keep **Compressed savestates** on. Chromium reserves a lot of memory it never uses, and without these options saving or loading a state takes several seconds; with them, it takes well under a second. Leave **Fork to save states** off: it crashes the game.
 
+Tools → Fast-forward mode:
+
+- **Skipping all rendering** fast-forwards fastest: the game then doesn't draw on screen, and its frames don't wait for the browser's frame rate. With **Skipping most rendering**, the frames that are drawn still wait for it. This needs `libtas_web.js` 2.2.0 or later, and a build of the libTAS fork from the same time or later.
+
 Movie → Movie Settings:
 
 - **Mouse support:** on, if you want to use the mouse (e.g. with the Enable Mouse mod).

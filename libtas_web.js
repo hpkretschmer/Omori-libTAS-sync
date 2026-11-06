@@ -21,6 +21,11 @@
 //   file and zlib operations (NW.js) are in progress, the page's animation
 //   frames are held back, so that loading takes no frames, as if loading was
 //   instant.
+// - Fast-forward: when libTAS skips drawing a frame, the page does not draw on
+//   the canvases shown on screen, and the frame runs right after the previous
+//   one and ends without waiting for the browser to present it.
+// - Non-draw frames: frames in which the page does not draw on screen are
+//   non-draw frames in libTAS, also when fast-forwarding.
 //
 // It needs a libTAS with page frame support, started with LIBTAS_PAGE_FRAMES=1.
 // Observers for debugging can set window.__libtasAfterFrame to a function,
@@ -139,14 +144,18 @@
     }
 
     /* Send the changes of the inputs from libTAS as events to the page. The
-     * inputs are "<pointer x> <pointer y> <button mask> <wheel> <keysym>...",
-     * see PageFrame.h in libTAS. Returns the framerate field
-     * "r<num>/<den>", or undefined if libTAS does not send it. */
+     * inputs are "<pointer x> <pointer y> <button mask> <wheel> [r<num>/<den>]
+     * [s] <keysym>...", see PageFrame.h in libTAS. Returns the framerate field
+     * "r<num>/<den>" (undefined if libTAS does not send it), and if the frame
+     * skips its draw ("s", when fast-forwarding). */
     function applyInputs(inputs) {
         var fields = inputs.split(' ');
         var framerate;
         if (fields[4] && fields[4][0] === 'r')
             framerate = fields.splice(4, 1)[0];
+        var skip = fields[4] === 's';
+        if (skip)
+            fields.splice(4, 1);
         var x = parseInt(fields[0], 10);
         var y = parseInt(fields[1], 10);
         var mask = parseInt(fields[2], 10);
@@ -183,7 +192,7 @@
             }));
         }
         sentMouse = {x: x, y: y, mask: mask};
-        return framerate;
+        return {framerate: framerate, skip: skip};
     }
 
     //-------------------------------------------------------------------------
@@ -411,6 +420,61 @@
     }
 
     //-------------------------------------------------------------------------
+    // Skipped draws
+    //-------------------------------------------------------------------------
+
+    /* True if libTAS skips drawing the current frame (fast-forward) */
+    var skipDraw = false;
+
+    /* True if the page does not draw on the canvases shown on screen in the
+     * current frame. Other canvases, e.g. images that the game draws text on,
+     * are drawn as usual, because the game may use them in later frames.
+     * Every 30th frame that skips its draw still draws on screen, so that the
+     * screen in a savestate made while fast-forwarding is at most that old. */
+    var skipScreenDraw = false;
+    var screenDrawInterval = 30;
+
+    /* True if the page drew on screen in the current frame, or would have if
+     * the frame did not skip its draw. libTAS marks frames without drawing as
+     * non-draw frames. */
+    var drewOnScreen = false;
+
+    var context2D = window.CanvasRenderingContext2D && CanvasRenderingContext2D.prototype;
+    if (context2D) {
+        ['drawImage', 'fillRect', 'clearRect', 'strokeRect', 'fillText',
+         'strokeText', 'fill', 'stroke', 'putImageData'].forEach(function(name) {
+            var orig = context2D[name];
+            if (typeof orig !== 'function')
+                return;
+            context2D[name] = function() {
+                if (this.canvas && this.canvas.isConnected) {
+                    drewOnScreen = true;
+                    if (skipScreenDraw)
+                        return;
+                }
+                return orig.apply(this, arguments);
+            };
+        });
+    }
+
+    /* WebGL drawing is only noticed, not skipped */
+    [window.WebGLRenderingContext, window.WebGL2RenderingContext].forEach(function(contextClass) {
+        if (!contextClass)
+            return;
+        ['clear', 'drawArrays', 'drawElements', 'drawArraysInstanced',
+         'drawElementsInstanced', 'drawRangeElements'].forEach(function(name) {
+            var orig = contextClass.prototype[name];
+            if (typeof orig !== 'function')
+                return;
+            contextClass.prototype[name] = function() {
+                if (this.canvas && this.canvas.isConnected)
+                    drewOnScreen = true;
+                return orig.apply(this, arguments);
+            };
+        });
+    });
+
+    //-------------------------------------------------------------------------
     // Frames
     //-------------------------------------------------------------------------
 
@@ -439,29 +503,69 @@
     var requested = false;
     var heldTicks = 0;
 
-    function request() {
+    /* Frames that skip their draw don't wait for the browser's next animation
+     * frame, which comes at the browser's frame rate, but run right after the
+     * previous frame. They end without a present, see the end of tick(). The
+     * browser may still hold the message back until its next animation frame
+     * (e.g. while loading), so request both, and run the frame with the one
+     * that comes first. */
+    var channel = new MessageChannel();
+    var requestId = 0;
+
+    /* True if the last frame drew outside of an animation frame, i.e. the
+     * first frame after frames that skip their draw. The browser only commits
+     * its drawing for a present at the end of its next animation frame, and a
+     * frame waits at its start for the present of the previous one. So that
+     * animation frame only commits, and the frame runs in the next one. */
+    var drewOutsideAnimationFrame = false;
+
+    function tickFor(id, inAnimationFrame) {
+        if (!requested || (id !== requestId))
+            return;
+        if (inAnimationFrame && drewOutsideAnimationFrame) {
+            drewOutsideAnimationFrame = false;
+            raf(function() { tickFor(id, true); });
+            return;
+        }
+        tick(inAnimationFrame);
+    }
+    channel.port1.onmessage = function(event) { tickFor(event.data, false); };
+
+    function request(useAnimationFrame) {
         if (!requested) {
             requested = true;
-            raf(tick);
+            var id = ++requestId;
+            if (skipDraw && !useAnimationFrame)
+                channel.port2.postMessage(id);
+            raf(function() { tickFor(id, true); });
         }
     }
 
-    function tick() {
+    function tick(inAnimationFrame) {
         requested = false;
         if (pendingLoads > 0) {
             /* About 10 s at 60 fps */
             if (++heldTicks === 600)
                 console.warn('libtas_web.js: frames held back for a long time, ' + pendingLoads + ' loads did not finish');
-            request();
+            /* Wait for the loads with animation frames, not busy waiting */
+            request(true);
             return;
         }
         heldTicks = 0;
 
         var inputs = directInputs ? readlinkSignal() : null;
-        if (inputs !== null)
-            setFramerate(applyInputs(inputs));
-        else
+        if (inputs !== null) {
+            var frame = applyInputs(inputs);
+            setFramerate(frame.framerate);
+            skipDraw = frame.skip;
+        }
+        else {
             accessSignal();
+        }
+        skipScreenDraw = skipDraw && ((frames % screenDrawInterval) !== 0);
+        drewOnScreen = false;
+        /* Also when the frame skips its draw: the browser's clock, which its
+         * timers and loads use, only advances while it keeps presenting */
         toggleMarker();
         frames++;
         clock += frameDuration;
@@ -477,6 +581,17 @@
                 setTimeout(function() { throw e; });
             }
         });
+
+        /* Tell libTAS that the frame ended, and if it drew. A frame that
+         * skips its draw or did not draw then ends without a present. Older
+         * libTAS versions don't know these paths, and end frames at presents. */
+        if (directInputs) {
+            try {
+                fs.accessSync(drewOnScreen ? '/libtas/page_frame_end' : '/libtas/page_frame_end_nodraw');
+            } catch (e) {}
+        }
+
+        drewOutsideAnimationFrame = !skipDraw && drewOnScreen && !inAnimationFrame;
 
         if (window.__libtasAfterFrame)
             window.__libtasAfterFrame(frames);
