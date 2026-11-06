@@ -32,6 +32,24 @@ If you added the script to `index.html` with an earlier version of this guide, r
 
 Earlier versions of the script, for loading it from `index.html`, are in the [releases](https://github.com/hpkretschmer/Omori-libTAS-sync/releases) and the git history of this repository.
 
+## RNG tracer mod
+
+[`mods/rngtracer`](mods/rngtracer) is a OneLoader mod for planning RNG manipulation. All randomness of OMORI comes from `Math.random`, which starts the same way at each boot under libTAS. The mod shows on the right of the screen how many times the game called it in the current frame, the total since boot, and where each call came from:
+
+| Source | Meaning |
+|---|---|
+| `ev 12,1,23` | map event 12, page 1, line 23 |
+| `CE 104,7` | common event 104, line 7 |
+| `ev 3,1,5 > CE 104,7` | common event 104, called at line 5 of event 3, page 1 |
+| `troop 5,2,3` | battle event of troop 5, page 2, line 3 |
+| `text ev 34,2,7` | the message added at `ev 34,2,7`, e.g. its letter sounds |
+| `ev 4 move` | autonomous movement of event 4, e.g. random movement |
+| `ev 13 route 7` | command 7 of a move route of event 13 (also `player`, `follower N`) |
+
+Each source is followed by the function that called `Math.random`, e.g. `Game_System.getMessageSound`. The same total at the same point means the same random numbers from there on.
+
+To install it, zip `mod.json` and `rng_tracer.js` into `www/mods/rngtracer.zip`. It can be turned on and off in OneLoader's mod list (the change applies when the game restarts). It does not change the random numbers or anything in the game, so movies sync with and without it. With the environment variable `RNG_TRACE_LOG` set to a file path, each frame with calls is also written to that file.
+
 ## Technical details
 
 The frame signal is a call to `fs.readlinkSync('/libtas/page_frame')`, which libTAS intercepts in its `readlink()` hook and answers with the inputs of the frame. At the end of each frame, the script calls `fs.accessSync()` on `/libtas/page_frame_end` or `/libtas/page_frame_end_nodraw`. This is documented in `src/library/PageFrame.h` of the libTAS fork, and the injection in `src/library/PageScript.h`.

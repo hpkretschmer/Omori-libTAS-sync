@@ -1,0 +1,16 @@
+{
+    "id": "rngtracer",
+    "name": "RNG Tracer",
+    "description": "Shows how many times the game used its random number generator in each frame, and which event line or function used it.",
+    "version": "1.0.0",
+    "files": {
+        "plugins": [
+            "rng_tracer.js"
+        ],
+        "text": [],
+        "data": [],
+        "maps": [],
+        "assets": [],
+        "exec": []
+    }
+}
