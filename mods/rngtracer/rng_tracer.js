@@ -2,13 +2,13 @@
 // RNG Tracer
 //-----------------------------------------------------------------------------
 // Shows on screen how many times the game used its random number generator
-// (Math.random) in the current frame, and where the calls came from.
+// (Math.random) in the current frame, the values it got, and where the calls
+// came from.
 //
-// All randomness of the game comes from Math.random, one sequence of numbers
-// that starts the same way at each boot under libTAS. Its state is the number
-// of calls since boot, shown as "total": the same total at the same point
-// means the same random numbers from there on (the calls before this plugin
-// was loaded are not counted, but they are the same at each boot).
+// All randomness of the game comes from Math.random. The libTAS fork seeds it
+// with the initial time (the V8 flag --random-seed in the app manifest), so
+// it is one sequence of numbers, and its state is the number of calls since
+// boot, shown as "total" (without the call before this plugin was loaded).
 //
 // Sources:
 //   ev 12,1,23        map event 12, page 1, line 23 of its commands
@@ -26,8 +26,19 @@
 // The plugin does not change the random numbers or the game, so movies
 // sync with and without it.
 //
-// Optional: if the environment variable RNG_TRACE_LOG is set to a file path,
-// every frame with calls is also written to that file.
+// Prediction: the display also shows the seed and the next values, computed
+// from the seed as V8 does, and checks each call against them.
+//
+// Hotkey G: writes the next RNG_DUMP_COUNT (default 100000) values to
+// RNG_DUMP_FILE (default rng_dump.txt in the game folder), one "index value"
+// per line, as tools/rngtool.py dump. The values are computed, so the game's
+// random numbers stay the same. Shift+G calls Math.random for real instead:
+// make a savestate before and load it after.
+//
+// Environment variables:
+//   RNG_TRACE_LOG    file to which every frame with calls is written, with
+//                    each call ("#index value source")
+//   RNG_DUMP_FILE, RNG_DUMP_COUNT   see the hotkey
 //=============================================================================
 
 (function() {
@@ -44,13 +55,255 @@
     /* Number of calls since this plugin was loaded */
     var total = 0;
 
-    /* Calls of the current frame, by source */
+    /* Calls of the current frame, by source: their number, and the first
+     * MAX_VALUES values */
     var frameCalls = new Map();
+    var MAX_VALUES = 6;
+
+    function addCalls(source, count, value) {
+        var calls = frameCalls.get(source);
+        if (!calls) {
+            calls = { count: 0, values: [] };
+            frameCalls.set(source, calls);
+        }
+        calls.count += count;
+        if (value !== undefined && calls.values.length < MAX_VALUES)
+            calls.values.push(value);
+    }
     var frameCount = 0;
 
     /* Context of the calls: a stack of labels for the interpreter commands
      * and movements that are running */
     var contexts = [];
+
+    //-------------------------------------------------------------------------
+    // Files
+    //-------------------------------------------------------------------------
+
+    /* Node's own fs: OneLoader gives plugins a require of its own, with a
+     * fs that only reads the game files */
+    var fs = null;
+    var path = null;
+    var gameFolder = '.';
+    try {
+        fs = process.mainModule.require('fs');
+        path = process.mainModule.require('path');
+        /* The main module is www/index.html */
+        gameFolder = path.dirname(path.dirname(process.mainModule.filename));
+    } catch (e) {
+        fs = null;
+    }
+
+    function env(name, defaultValue) {
+        var value = (typeof process !== 'undefined') ? process.env[name] : undefined;
+        return value ? value : defaultValue;
+    }
+
+    var logFd = null;
+    try {
+        if (fs && env('RNG_TRACE_LOG'))
+            logFd = fs.openSync(env('RNG_TRACE_LOG'), 'a');
+    } catch (e) {
+        logFd = null;
+    }
+
+    //-------------------------------------------------------------------------
+    // Prediction
+    //-------------------------------------------------------------------------
+
+    /* Seed of Math.random: the libTAS fork gives V8 the flag
+     * --random-seed=<initial time> in the app manifest. Null without it. */
+    var seed = null;
+    try {
+        var seedMatch = /--random-seed=(-?\d+)/.exec(nw.App.manifest['js-flags'] || '');
+        if (seedMatch)
+            seed = parseInt(seedMatch[1], 10);
+    } catch (e) {
+        seed = null;
+    }
+
+    /* Math.random of V8 6.5 (Runtime_GenerateRandomNumbers) is xorshift128+,
+     * starting from the state (seed, seed): each value is the low 52 bits of
+     * state0 + state1, divided by 2^52. V8 generates 62 values at once into a
+     * cache of 64 doubles, returns them from the end, and keeps state0 and
+     * state1 as doubles in the last 2 entries. Storing a double replaces a
+     * NaN by the canonical NaN, so a state whose bits are a NaN becomes
+     * 0x7FF8000000000000 after its block. 64-bit numbers are pairs of 32-bit
+     * numbers [high, low] here (there is no BigInt in this V8). */
+    var BLOCK = 62;
+    var TWO32 = 4294967296;
+
+    function shl(x, n) {
+        return [((x[0] << n) | (x[1] >>> (32 - n))) >>> 0, (x[1] << n) >>> 0];
+    }
+    function shr(x, n) {
+        return [x[0] >>> n, ((x[1] >>> n) | (x[0] << (32 - n))) >>> 0];
+    }
+    function xor(a, b) {
+        return [(a[0] ^ b[0]) >>> 0, (a[1] ^ b[1]) >>> 0];
+    }
+
+    /* One step of V8's XorShift128 on state [s0, s1] */
+    function step(state) {
+        var a = state[0], b = state[1];
+        a = xor(a, shl(a, 23));
+        a = xor(a, shr(a, 17));
+        a = xor(a, b);
+        a = xor(a, shr(b, 26));
+        state[0] = b;
+        state[1] = a;
+    }
+
+    function output(state) {
+        var low = state[0][1] + state[1][1];
+        var carry = low >= TWO32 ? 1 : 0;
+        var high = (state[0][0] + state[1][0] + carry) & 0xFFFFF;
+        return (high * TWO32 + (low % TWO32)) / 4503599627370496;
+    }
+
+    /* The state as V8 stores it: a NaN becomes the canonical NaN */
+    function stored(x) {
+        var exponent = (x[0] >>> 20) & 0x7FF;
+        var mantissa = (x[0] & 0xFFFFF) || x[1];
+        return (exponent === 0x7FF && mantissa) ? [0x7FF80000, 0] : x;
+    }
+
+    /* Generates the next block from `state` (changed to the state that V8
+     * stores after it), in the order of return */
+    function generateBlock(state) {
+        var block = [];
+        for (var i = 0; i < BLOCK; i++) {
+            step(state);
+            block.push(output(state));
+        }
+        state[0] = stored(state[0]);
+        state[1] = stored(state[1]);
+        return block.reverse();
+    }
+
+    /* The prediction: the block that contains the next calls, its first
+     * index, and the state after it. The sequence starts at the first call
+     * ever, before this plugin was loaded, so the first call that the plugin
+     * sees tells where it is. */
+    var prediction = null;
+    /* Why there is no prediction, '' while there is one or before the first
+     * call */
+    var predictionMessage = (seed === null) ? 'no seed (needs the libTAS fork with --random-seed)' : '';
+
+    function findPrediction(index, value) {
+        var high = seed < 0 ? 0xFFFFFFFF : 0;
+        var state = [[high, seed >>> 0], [high, seed >>> 0]];
+        for (var b = 0; b < 100; b++) {
+            var block = generateBlock(state);
+            var k = block.indexOf(value);
+            if (k >= 0) {
+                prediction = { index: index - k, state: state, block: block };
+                return;
+            }
+        }
+        predictionMessage = 'the values do not come from the seed ' + seed;
+    }
+
+    /* Advances `cursor` to the block that contains `index` */
+    function advance(cursor, index) {
+        while (index >= cursor.index + BLOCK) {
+            cursor.index += BLOCK;
+            cursor.block = generateBlock(cursor.state);
+        }
+    }
+
+    function checkPrediction(index, value) {
+        if (predictionMessage)
+            return;
+        if (!prediction)
+            findPrediction(index, value);
+        if (!prediction)
+            return;
+        advance(prediction, index);
+        if (prediction.block[index - prediction.index] !== value) {
+            prediction = null;
+            predictionMessage = 'prediction wrong at #' + index;
+            if (logFd !== null)
+                frameCallLines.push('  ' + predictionMessage);
+        }
+    }
+
+    /* `count` predicted values from `index`, without changing the prediction */
+    function predictedValues(index, count) {
+        advance(prediction, index);
+        var cursor = {
+            index: prediction.index,
+            state: [prediction.state[0].slice(), prediction.state[1].slice()],
+            block: prediction.block
+        };
+        var values = [];
+        for (var i = index; i < index + count; i++) {
+            advance(cursor, i);
+            values.push(cursor.block[i - cursor.index]);
+        }
+        return values;
+    }
+
+    //-------------------------------------------------------------------------
+    // Hotkey
+    //-------------------------------------------------------------------------
+
+    var KEY_G = 71;
+
+    /* Message shown after the hotkey, until the frame `noticeUntil` */
+    var notice = '';
+    var noticeUntil = 0;
+
+    function showNotice(text) {
+        notice = text;
+        noticeUntil = frameCount + 300;
+    }
+
+    function dumpValues(real) {
+        var count = Math.max(1, parseInt(env('RNG_DUMP_COUNT', '100000'), 10) || 100000);
+        var file = env('RNG_DUMP_FILE', path ? path.join(gameFolder, 'rng_dump.txt') : '');
+        if (!fs || !file) {
+            showNotice('G: cannot write files');
+            return;
+        }
+        var first = total + 1;
+        var values;
+        if (real || !prediction) {
+            real = true;
+            values = [];
+            for (var i = 0; i < count; i++) {
+                var value = originalRandom();
+                total++;
+                checkPrediction(total, value);
+                values.push(value);
+            }
+            addCalls('hotkey G', count);
+            if (logFd !== null)
+                frameCallLines.push('  #' + first + '-#' + total + ' hotkey G (' + count + ' calls)');
+        } else {
+            values = predictedValues(first, count);
+        }
+        var lines = values.map(function(value, i) {
+            return (first + i) + ' ' + value.toPrecision(17);
+        });
+        try {
+            fs.writeFileSync(file, lines.join('\n') + '\n');
+        } catch (e) {
+            showNotice('G: cannot write ' + file + ': ' + e.message);
+            return;
+        }
+        var bound = (Input.keyMapper && Input.keyMapper[KEY_G]) ? '\nwarning: G is bound to "' + Input.keyMapper[KEY_G] + '" in the game' : '';
+        if (real)
+            showNotice('G: called Math.random ' + count + ' times (#' + first + '-#' + total + '),\nwrote the values to ' + file + '\nload your savestate!' + bound);
+        else
+            showNotice('G: wrote ' + count + ' predicted values (#' + first + '-) to\n' + file + ', RNG unchanged' + bound);
+    }
+
+    document.addEventListener('keydown', function(event) {
+        if (event.keyCode !== KEY_G || event.repeat || event.ctrlKey || event.altKey || event.metaKey)
+            return;
+        dumpValues(event.shiftKey);
+    });
 
     //-------------------------------------------------------------------------
     // Sources
@@ -186,13 +439,20 @@
         return name;
     }
 
+    /* Lines of the calls of the current frame, for the log */
+    var frameCallLines = [];
+
     function tracedRandom() {
+        var value = originalRandom.apply(this, arguments);
         total++;
         var source = callerName();
         if (contexts.length > 0)
             source = contextChain() + ' ' + source;
-        frameCalls.set(source, (frameCalls.get(source) || 0) + 1);
-        return originalRandom.apply(this, arguments);
+        addCalls(source, 1, value);
+        checkPrediction(total, value);
+        if (logFd !== null)
+            frameCallLines.push('  #' + total + ' ' + value.toPrecision(17) + ' ' + source);
+        return value;
     }
     Math.random = tracedRandom;
 
@@ -262,20 +522,36 @@
         style.color = '#fff';
         style.background = 'rgba(0, 0, 0, 0.6)';
         style.padding = '2px 4px';
-        style.maxWidth = '380px';
+        style.maxWidth = '400px';
         style.overflow = 'hidden';
         document.body.appendChild(overlay);
     }
 
     function frameLines() {
         var entries = Array.from(frameCalls.entries());
-        entries.sort(function(a, b) { return b[1] - a[1]; });
+        entries.sort(function(a, b) { return b[1].count - a[1].count; });
         var count = 0;
-        entries.forEach(function(entry) { count += entry[1]; });
-        var lines = ['RNG +' + count + '  total ' + total];
+        entries.forEach(function(entry) { count += entry[1].count; });
+        var lines = ['RNG +' + count + '  total ' + total + (seed !== null ? '  seed ' + seed : '')];
+        if (prediction) {
+            lines.push('next ' + predictedValues(total + 1, 5).map(function(v) {
+                return v.toFixed(4);
+            }).join(' '));
+        } else {
+            lines.push(predictionMessage || 'waiting for the first call');
+        }
+        if (notice && frameCount < noticeUntil)
+            lines.push(notice);
         entries.forEach(function(entry, i) {
-            if (i < MAX_LINES)
-                lines.push(entry[1] + ' ' + entry[0]);
+            if (i >= MAX_LINES)
+                return;
+            /* The values that were rolled, before the source, which may be
+             * too long for the display */
+            var calls = entry[1];
+            var values = calls.values.map(function(v) { return v.toFixed(4); }).join(' ');
+            if (calls.count > calls.values.length && calls.values.length > 0)
+                values += ' ...';
+            lines.push(calls.count + (values ? ' [' + values + ']' : '') + ' ' + entry[0]);
         });
         if (entries.length > MAX_LINES)
             lines.push('+' + (entries.length - MAX_LINES) + ' more sources');
@@ -302,25 +578,15 @@
     // Log
     //-------------------------------------------------------------------------
 
-    /* Node's own fs: OneLoader gives plugins a require of its own, with a
-     * fs that only reads the game files */
-    var fs = null;
-    var logFd = null;
-    try {
-        if (typeof process !== 'undefined' && process.env.RNG_TRACE_LOG) {
-            fs = process.mainModule.require('fs');
-            logFd = fs.openSync(process.env.RNG_TRACE_LOG, 'a');
-        }
-    } catch (e) {
-        logFd = null;
-    }
-
     function logFrame(lines) {
         if (logFd === null || frameCalls.size === 0)
             return;
+        lines = lines.filter(function(line) { return line.indexOf('\n') < 0; });
         var scene = SceneManager._scene ? SceneManager._scene.constructor.name : '-';
         var map = window.$gameMap ? $gameMap.mapId() : 0;
         var text = 'update ' + frameCount + ' ' + scene + ' map ' + map + ' | ' + lines.join(' | ') + '\n';
+        if (frameCallLines.length > 0)
+            text += frameCallLines.join('\n') + '\n';
         try {
             fs.writeSync(logFd, text);
         } catch (e) {
@@ -339,8 +605,9 @@
         sceneManagerUpdate.apply(this, arguments);
         frameCount++;
         var lines = frameLines();
-        logFrame(lines);
+        logFrame(lines.slice(0, 1).concat(lines.slice(2)));
         showFrame(lines);
         frameCalls.clear();
+        frameCallLines = [];
     };
 })();

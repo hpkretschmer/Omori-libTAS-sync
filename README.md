@@ -34,7 +34,7 @@ Earlier versions of the script, for loading it from `index.html`, are in the [re
 
 ## RNG tracer mod
 
-[`mods/rngtracer`](mods/rngtracer) is a OneLoader mod for planning RNG manipulation. All randomness of OMORI comes from `Math.random`, which starts the same way at each boot under libTAS. The mod shows on the right of the screen how many times the game called it in the current frame, the total since boot, and where each call came from:
+[`mods/rngtracer`](mods/rngtracer) is a OneLoader mod for planning RNG manipulation. All randomness of OMORI comes from `Math.random`, which the libTAS fork seeds with the initial time of the movie (see below). The mod shows on the right of the screen how many times the game called it in the current frame, the total since boot, and for each source of calls the number of calls, the values they got (the first 6) and the source, e.g. `2 [0.4721 0.0913] text ev 34,2,7 Game_System.getMessageSound`. Sources are:
 
 | Source | Meaning |
 |---|---|
@@ -48,7 +48,26 @@ Earlier versions of the script, for loading it from `index.html`, are in the [re
 
 Each source is followed by the function that called `Math.random`, e.g. `Game_System.getMessageSound`. The same total at the same point means the same random numbers from there on.
 
-To install it, zip `mod.json` and `rng_tracer.js` into `www/mods/rngtracer.zip`. It can be turned on and off in OneLoader's mod list (the change applies when the game restarts). It does not change the random numbers or anything in the game, so movies sync with and without it. With the environment variable `RNG_TRACE_LOG` set to a file path, each frame with calls is also written to that file.
+To install it, zip `mod.json` and `rng_tracer.js` into `www/mods/rngtracer.zip`. It can be turned on and off in OneLoader's mod list (the change applies when the game restarts). It does not change the random numbers or anything in the game, so movies sync with and without it. With the environment variable `RNG_TRACE_LOG` set to a file path, each frame with calls is also written to that file, with the index, value and source of each call.
+
+### Predicting the random numbers
+
+The libTAS fork (from commit [2f35cd90](https://github.com/hpkretschmer/libTAS/commit/2f35cd90)) gives NW.js games the V8 flag `--random-seed=<initial time>` (in the `js-flags` of the manifest that it gives NW.js, together with the injected script). Otherwise V8 would seed `Math.random` from `/dev/urandom`, through a generator that it also uses for other things (e.g. identity hashes of objects), so the random numbers would depend on the timing of the game's threads. With the flag, they only depend on the initial time in the movie settings (1 by default), and the value of each call follows from its index (the total of the mod).
+
+`Math.random` of NW.js 0.29 (V8 6.5, `Runtime_GenerateRandomNumbers` in `src/runtime/runtime-maths.cc`) is xorshift128+ from the state `(seed, seed)`: each value is the low 52 bits of `state0 + state1`, divided by 2^52, so the values are multiples of 2^-52 from 0 to 1 - 2^-52. V8 keeps a cache of 64 doubles: it generates 62 values into it and returns them from the end, so each block of 62 values comes in reverse order, and the last 2 entries hold `state0` and `state1` as doubles. Storing a double replaces any NaN by the canonical NaN (`FixedDoubleArray::set`), so a state whose bits are a NaN becomes `0x7FF8000000000000` after its block, and the sequence continues from there (about once every 1000 blocks).
+
+[`tools/rngtool.py`](tools/rngtool.py) computes the values without calling `Math.random`:
+
+- `rngtool.py search --seed 1 --from 2481 --where "v < 0.01"`: the next indices whose value matches a condition (any Python condition on the value `v` and its index `i`), and how many calls away they are,
+- `rngtool.py dump --seed 1 --from 2481 --count 100000 -o values.txt`: the values, one `index value` per line.
+
+`--seed` is the initial time of the movie. The sequence starts at index 0: OMORI calls `Math.random` once before the mod loads.
+
+The mod reads the seed from the manifest, shows it next to the total and the next 5 values below, and checks every call against the prediction: if one differs, it shows `prediction wrong at #N`.
+
+### Hotkey G
+
+**G** writes the next 100000 values (`RNG_DUMP_COUNT`) to `rng_dump.txt` in the game folder (`RNG_DUMP_FILE`), one `index value` per line, as `rngtool.py dump`. The values are computed, so the game's random numbers stay the same: no savestate is needed. **Shift+G** calls `Math.random` for real instead: make a savestate before and load it after. The key press is recorded in the movie, but the game does not use G (except to type a name, or if a control is bound to G in the options, which the mod warns about).
 
 ## Technical details
 
