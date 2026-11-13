@@ -19,12 +19,14 @@ Outside of libTAS, nothing. Under libTAS, it changes how the game sees its surro
 
 See [SETUP.md](SETUP.md) for the complete setup. In short:
 
-- OMORI 1.0.0 running on Linux with the Linux build of NW.js 0.29.0, with the Steam integration stubbed. OMORI only ships for Windows, so this needs some setup.
+- OMORI (tested with 1.0.0 and 1.0.6) running on Linux with the Linux build of NW.js 0.29.0, with the Steam integration stubbed. OMORI only ships for Windows, so this needs some setup.
 - libTAS with support for page frames and case-insensitive file names. This is currently on the [`nwjs-support` branch](https://github.com/hpkretschmer/libTAS/tree/nwjs-support) of a libTAS fork, not in upstream libTAS.
 
 ## Installation
 
-In libTAS (File → Executable Options), set the environment variables `LIBTAS_PAGE_FRAMES` = `1` and `LIBTAS_CASE_INSENSITIVE` = `1`, and add `--run-all-compositor-stages-before-draw` to the NW.js arguments. Nothing has to be added to the game.
+In libTAS (File → Executable Options), set the environment variables `LIBTAS_PAGE_FRAMES` = `1`, `LIBTAS_CASE_INSENSITIVE` = `1` and `LIBTAS_CHROMIUM_ARGS` = `--single-process --in-process-gpu --no-sandbox --no-zygote --disable-gpu --run-all-compositor-stages-before-draw`, and give NW.js only the game folder and the Steam key as arguments: `/path/to/omori --6bdb2e585882fbd48826ef9cffd4c511`. libTAS adds the Chromium options of `LIBTAS_CHROMIUM_ARGS` to the game's manifest. This needs the libTAS fork from commit [41b6eec2](https://github.com/hpkretschmer/libTAS/commit/41b6eec2) or later, which also makes the game exit properly after Stop. Nothing has to be added to the game.
+
+OMORI 1.0.6 and later decrypt their plugins with the Steam key, and take all the arguments as the key: with any other argument (e.g. Chromium options from an earlier version of this guide), they show a black screen. They also need the current Steam stub (`linux/greenworks.js`), which reports Steam as available, and the normal NW.js build, not the SDK.
 
 The script is part of the libTAS fork ([`src/library/web/libtas_web.js`](https://github.com/hpkretschmer/libTAS/blob/nwjs-support/src/library/web/libtas_web.js)), which builds it into `libtas.so`. With `LIBTAS_PAGE_FRAMES=1`, libTAS gives NW.js the game's `package.json` with `"inject_js_start"` added, so that NW.js runs the script before any script of the game. The game's files stay unchanged.
 

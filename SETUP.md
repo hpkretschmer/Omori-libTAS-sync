@@ -1,6 +1,6 @@
 # Setting up OMORI for TASing with libTAS on Linux
 
-This guide gets OMORI 1.0.0 running deterministically under [libTAS](https://github.com/clementgallet/libTAS) on Linux. OMORI only ships for Windows, but it's an RPG Maker MV game that runs on NW.js (Chromium with Node.js), so its game files run on the Linux build of the same NW.js version, without Wine or Proton.
+This guide gets OMORI (tested with 1.0.0 and 1.0.6) running deterministically under [libTAS](https://github.com/clementgallet/libTAS) on Linux. OMORI only ships for Windows, but it's an RPG Maker MV game that runs on NW.js (Chromium with Node.js), so its game files run on the Linux build of the same NW.js version, without Wine or Proton.
 
 The game stays as close to unmodified as possible: besides the Steam stub that Linux needs, nothing in the game is changed. libTAS injects its script into the game (see [README.md](README.md)). Mods are optional.
 
@@ -10,7 +10,7 @@ Tested on Linux Mint with X11. The paths below are examples; adjust them to your
 | --- | --- |
 | Working copy of the game | `~/Games/omori-tas` |
 | Linux NW.js | `~/Games/nwjs/nwjs-v0.29.0-linux-x64` |
-| Game data and NW.js profile | `~/Games/omori-tas-data` |
+| Game data | `~/Games/omori-tas-data` |
 
 The files referred to below (`linux/...`) are in this repository.
 
@@ -19,7 +19,7 @@ The files referred to below (`linux/...`) are in this repository.
 OMORI has no Linux build, so Steam has to download the Windows version:
 
 1. In the Steam library, right-click OMORI → Properties → Compatibility, and check "Force the use of a specific Steam Play compatibility tool" with any Proton version.
-2. Install the version of the game you want to TAS. This guide was tested with 1.0.0.
+2. Install the version of the game you want to TAS. This guide was tested with 1.0.0 and 1.0.6.
 
 It doesn't matter if the game only shows a black window when started from Steam; Proton isn't used after this.
 
@@ -36,7 +36,7 @@ Your Steam library may be in a different place, e.g. `~/.local/share/Steam/steam
 
 ## 3. Download Linux NW.js 0.29.0
 
-v0.29.0 is the only NW.js release with exactly OMORI's Chromium (65.0.3325.146) and Node.js (9.7.1) versions. The SDK build adds the developer tools (F12), which help with debugging but aren't needed.
+v0.29.0 is the only NW.js release with exactly OMORI's Chromium (65.0.3325.146) and Node.js (9.7.1) versions. Use the normal build: the SDK build adds the developer tools (F12), which help with debugging 1.0.0, but OMORI 1.0.6 and later refuse to run in it ("This game does not work in SDK mode.").
 
 ```sh
 mkdir -p ~/Games/nwjs && cd ~/Games/nwjs
@@ -63,7 +63,7 @@ This installs libTAS, and `libtas-casefold.so` (see step 7) next to it in `/usr/
 
 ## 5. Replace the Steam integration with a stub
 
-The game's Steam binding needs a running Steam client. Replace it with a stub that reports Steam as unavailable, which makes the game turn off achievements, cloud saves and the overlay:
+The game's Steam binding needs a running Steam client. Replace it with a stub that reports Steam as available, but without achievements, cloud saves or overlay (OMORI 1.0.6 and later stop at boot with "Steam has not been detected." if Steam is unavailable):
 
 ```sh
 cd ~/Games/omori-tas/www/js/libs
@@ -79,40 +79,30 @@ If you followed an earlier version of this guide, which added `<script type="tex
 
 ## 7. Test the game without libTAS
 
-`linux/run-linux.sh` starts the game with the NW.js options needed for libTAS (single process, no GPU). It also:
+`linux/run-linux.sh` starts the game with NW.js, as Steam does: with the Steam key `--6bdb2e585882fbd48826ef9cffd4c511` as the only argument. OMORI 1.0.6 and later decrypt their plugins with that key, and take all the arguments of the game as the key, so the game must not get any other argument (otherwise it shows a black screen). OneLoader also needs it. The script also:
 
 - sets `LOCALAPPDATA`, where the game stores which cutscenes can be skipped (`OMORI/CUTSCENE.json`); that variable doesn't exist on Linux.
 - loads `libtas-casefold.so` from step 4. The game accesses some files with a different case than they have (e.g. `www/Languages/` for `www/languages/`, `Leaf.png` for `leaf.rpgmvp`), which only works on Windows. The library finds these files ignoring case. Under libTAS, libTAS does the same itself (step 8).
 
 ```sh
 cp /path/to/Omori-libTAS-sync/linux/run-linux.sh ~/Games/omori-tas/
-~/Games/omori-tas/run-linux.sh --enable-logging=stderr
+~/Games/omori-tas/run-linux.sh
 ```
 
-The title screen should appear. These log lines are expected:
-
-| Log line | Meaning |
-| --- | --- |
-| `Cannot use V8 Proxy resolver in single process mode` | Network proxy feature, unused |
-| `Lost UI shared context` | Side effect of `--disable-gpu` |
-| `Steamworks failed to initialize.` | The Steam stub is working |
-| `fail_if_major_perf_caveat + swiftshader` | WebGL is refused, the game uses its Canvas renderer |
-| `ENOENT ... OMORI/CUTSCENE.json` | No cutscene has been seen yet |
-
-If you see `ENOENT ... www/Languages/` or `$atlasData is not defined`, `libtas-casefold.so` was not loaded: check that it's in `/usr/local/bin`, or set `CASEFOLD=/path/to/libtas-casefold.so`.
+The title screen should appear. If the game stops with an error about `www/Languages/` or `$atlasData is not defined`, `libtas-casefold.so` was not loaded: check that it's in `/usr/local/bin`, or set `CASEFOLD=/path/to/libtas-casefold.so`.
 
 ## 8. Configure libTAS
 
 Main window:
 
 - **Game executable:** `~/Games/nwjs/nwjs-v0.29.0-linux-x64/nw` (as an absolute path)
-- **Command-line options** (one line, with absolute paths, no line break at the end):
+- **Command-line options** (one line, with an absolute path, no line break at the end):
 
   ```
-  /home/you/Games/omori-tas --user-data-dir=/home/you/Games/omori-tas-data/nw-profile --single-process --in-process-gpu --no-sandbox --no-zygote --disable-gpu --run-all-compositor-stages-before-draw --enable-logging=stderr
+  /home/you/Games/omori-tas --6bdb2e585882fbd48826ef9cffd4c511
   ```
 
-  `--enable-logging=stderr` is optional; it puts the game's console output in the terminal.
+  The game folder and the Steam key (see step 7), nothing else: with OMORI 1.0.6 and later, any other argument gives a black screen. The Chromium options go into `LIBTAS_CHROMIUM_ARGS` below instead. With 1.0.0, `--enable-logging=stderr` can be added to see the game's console output in the terminal.
 
 File → Executable Options:
 
@@ -121,6 +111,7 @@ File → Executable Options:
   - `LOCALAPPDATA` = `/home/you/Games/omori-tas-data`
   - `LIBTAS_PAGE_FRAMES` = `1`: libTAS only ends a frame when the script signals one.
   - `LIBTAS_CASE_INSENSITIVE` = `1`: libTAS finds files ignoring case (see step 7).
+  - `LIBTAS_CHROMIUM_ARGS` = `--single-process --in-process-gpu --no-sandbox --no-zygote --disable-gpu --run-all-compositor-stages-before-draw`: Chromium options, which libTAS adds to the `chromium-args` of the game's manifest, so that they are not on the command line. libTAS needs the whole game in one process without sandbox and without GPU process, and each frame drawn completely before it is shown. `--disable-gpu` makes OMORI draw without WebGL, the tested configuration.
 
 Settings → Runtime:
 
@@ -152,10 +143,10 @@ Mods are useful while working on a TAS, but they change the game: a TAS that is 
 - The game can't see a key pressed on two logic steps in a row as two presses: it compares the state of each button at each logic step, so the key has to be released for at least one logic step in between. This is how RPG Maker reads keys, also without libTAS. Mouse clicks are different: the game collects them between two logic steps, so at 120 fps, pressing on one frame and releasing on the next counts as one click per logic step. That needs a mod that enables the mouse, because OMORI ignores mouse clicks by default (not tested yet).
 - The on-screen display works.
 - Encoding works. The window starts at 680×480 and the game then resizes it to 640×480, so libTAS writes the first frame into its own file: encoding to `omori.mkv` gives a one-frame `omori.mkv` and the actual video in `omori_1.mkv`.
-- If the game doesn't start after a crash or kill, delete NW.js's stale lock files:
+- If the game doesn't start after a crash or kill, delete NW.js's stale lock files in its profile folder, `~/.config/` followed by the `name` in the game's `package.json` (`OMORI` in 1.0.6):
 
   ```sh
-  rm -f ~/Games/omori-tas-data/nw-profile/Singleton*
+  rm -f ~/.config/OMORI/Singleton*
   ```
 
 ## Known issues

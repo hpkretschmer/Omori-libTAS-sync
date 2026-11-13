@@ -1,12 +1,13 @@
 // Stub replacing the Steamworks binding so the game runs without Steam.
-// initAPI() returns false, which makes Archeia_Steamworks skip every Steam call.
-// The remaining functions only return harmless defaults in case they are reached anyway.
+// initAPI() returns true, because OMORI 1.0.6 and later stop at boot with
+// "Steam has not been detected." otherwise. The game then calls the functions
+// below, which return no achievements, no cloud and harmless defaults.
 function noop() {}
 function callError(cb) { if (typeof cb === 'function') cb(new Error('Steam stubbed')); }
 
 var greenworks = {
-  initAPI: function() { return false; },
-  init: function() { return false; },
+  initAPI: function() { return true; },
+  init: function() { return true; },
   getAppId: function() { return 1150690; },
   getSteamId: function() {
     return { steamId: '0', accountId: 0, staticAccountId: '0', screenName: 'Player',
