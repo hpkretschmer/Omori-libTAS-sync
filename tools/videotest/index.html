@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html><body style="margin:0;background:#000">
+<canvas id="c" width="640" height="360"></canvas>
+<script>
+// Video determinism test for libTAS: plays clip.webm at 85% from frame 30, draws it on a canvas every frame,
+// and writes the frame of the 'ended' event and the video time at some frames to $VIDEOTEST_OUT.
+var fs = require('fs');
+var out = process.env.VIDEOTEST_OUT || '/dev/null';
+fs.writeFileSync(out, '');
+function log(s) { fs.appendFileSync(out, s + '\n'); }
+var video = document.createElement('video');
+video.src = 'clip.webm';
+video.preload = 'auto';
+video.load();
+video.addEventListener('ended', function() { log('ended frame=' + frame + ' t=' + video.currentTime.toFixed(3)); });
+var ctx = document.getElementById('c').getContext('2d');
+var frame = 0;
+function step() {
+    frame++;
+    if (frame === 30) { video.playbackRate = 0.85; video.play(); log('play frame=' + frame + ' readyState=' + video.readyState); }
+    if (frame % 100 === 0) log('frame=' + frame + ' t=' + video.currentTime.toFixed(3) + ' paused=' + video.paused + ' ended=' + video.ended);
+    ctx.fillStyle = '#000'; ctx.fillRect(0, 0, 640, 360);
+    if (video.readyState >= 2) ctx.drawImage(video, 0, 0, 640, 360);
+    ctx.fillStyle = '#fff'; ctx.fillText('frame ' + frame, 10, 20);
+    requestAnimationFrame(step);
+}
+requestAnimationFrame(step);
+</script>
+</body></html>

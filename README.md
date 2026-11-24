@@ -2,7 +2,7 @@
 
 Makes OMORI deterministic when TASing it with [libTAS](https://github.com/clementgallet/libTAS) on Linux, so that movies don't desync, without changing the game's files: libTAS injects one script, `libtas_web.js`, into the game when it starts it. No mods are needed.
 
-The script knows nothing about OMORI or RPG Maker. It should also work for other games running on NW.js, such as other RPG Maker MV and MZ games, but it has only been tested with OMORI so far.
+The script knows nothing about OMORI or RPG Maker. It should also work for other games running on NW.js, such as other RPG Maker MV and MZ games. [games/](games/README.md) describes how to set up other RPG Maker games, with one file per game tested so far.
 
 ## What the script does
 
@@ -13,6 +13,7 @@ Outside of libTAS, nothing. Under libTAS, it changes how the game sees its surro
 - **Inputs apply on the frame they are entered.** The browser delivers keyboard and mouse events at an undefined time, so an input could reach the game one frame late, or a one-frame press could get lost, depending on timing (e.g. when frame advancing). The script ignores these events, and gets the inputs of each frame from libTAS instead.
 - **Fast-forward is fast.** When libTAS fast-forwards with rendering skipped, the game doesn't draw on screen, and its frames run right after each other instead of at the browser's own frame rate. What the game computes is the same as when playing normally.
 - **Frames without drawing are non-draw frames.** Frames in which the game doesn't draw on screen are non-draw frames in libTAS (red in the input editor), the same with and without fast-forward.
+- **Videos end on the same frame every run.** For the game, a playing video advances by one frame duration per frame, and its end is reported on that frame, also when fast-forwarding. The picture and sound still come from the browser. A video also counts as loading until it has data. This needs the libTAS fork from commit [b33b5528](https://github.com/hpkretschmer/libTAS/commit/b33b5528) or later.
 - **Loading takes no frames.** Loading files takes a different time every run. While images, data files or audio are loading (also the files that mod loaders such as OneLoader read through Node.js), the script holds back the game's animation frames, as if loading was instant.
 
 ## Requirements
